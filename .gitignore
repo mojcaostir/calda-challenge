@@ -3,9 +3,10 @@ node_modules
 .vscode
 .idea
 
-# Supabase
 **/supabase/.branches
 **/supabase/.temp
 **/supabase/snippets
 
 .env
+
+.npmrc
