@@ -1,4 +1,7 @@
-import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  assert,
+  assertEquals,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   aggregateStockQuantities,
   handleOrdersCreate,
@@ -41,7 +44,9 @@ Deno.test("aggregateStockQuantities aggregates by variant", () => {
 });
 
 Deno.test("handleOrdersCreate returns 405 for non-POST", async () => {
-  const res = await handleOrdersCreate(new Request("http://localhost/orders-create", { method: "GET" }));
+  const res = await handleOrdersCreate(
+    new Request("http://localhost/orders-create", { method: "GET" }),
+  );
 
   assertEquals(res.status, 405);
   assertEquals(await res.json(), { error: "Method Not Allowed" });
@@ -84,21 +89,27 @@ Deno.test("handleOrdersCreate returns 500 when service role key is missing", asy
   });
 
   assertEquals(res.status, 500);
-  assertEquals(await res.json(), { error: "SUPABASE_SERVICE_ROLE_KEY is not configured" });
+  assertEquals(await res.json(), {
+    error: "SUPABASE_SERVICE_ROLE_KEY is not configured",
+  });
 });
 
 Deno.test("handleOrdersCreate reserves stock and writes inventory movements", async () => {
   const calls: {
-    inventoryUpdates: Array<{ variant_id: string; on_hand: number; reserved: number }>;
+    inventoryUpdates: Array<
+      { variant_id: string; on_hand: number; reserved: number }
+    >;
     movementRows: Array<{ variant_id: string; reason: string; delta: number }>;
   } = {
     inventoryUpdates: [],
     movementRows: [],
   };
 
-  const inventoryState = new Map<string, { on_hand: number; reserved: number }>([
-    ["v1", { on_hand: 10, reserved: 1 }],
-  ]);
+  const inventoryState = new Map<string, { on_hand: number; reserved: number }>(
+    [
+      ["v1", { on_hand: 10, reserved: 1 }],
+    ],
+  );
 
   const userClient = {
     auth: {
@@ -109,7 +120,10 @@ Deno.test("handleOrdersCreate reserves stock and writes inventory movements", as
         return {
           select: (_: string) => ({
             eq: (_col: string, _val: string) => ({
-              maybeSingle: async () => ({ data: { id: "addr-1" }, error: null }),
+              maybeSingle: async () => ({
+                data: { id: "addr-1" },
+                error: null,
+              }),
             }),
           }),
         };
@@ -164,7 +178,10 @@ Deno.test("handleOrdersCreate reserves stock and writes inventory movements", as
             }),
           }),
           update: (_row: Record<string, unknown>) => ({
-            eq: async (_col: string, _val: string) => ({ data: null, error: null }),
+            eq: async (_col: string, _val: string) => ({
+              data: null,
+              error: null,
+            }),
           }),
         };
       }
@@ -185,7 +202,10 @@ Deno.test("handleOrdersCreate reserves stock and writes inventory movements", as
         return {
           select: (_: string) => ({
             in: async (_col: string, vals: string[]) => ({
-              data: vals.map((id) => ({ variant_id: id, ...inventoryState.get(id)! })),
+              data: vals.map((id) => ({
+                variant_id: id,
+                ...inventoryState.get(id)!,
+              })),
               error: null,
             }),
           }),
@@ -202,7 +222,10 @@ Deno.test("handleOrdersCreate reserves stock and writes inventory movements", as
                 const current = inventoryState.get(variantId);
                 if (!current) return { data: null, error: null };
 
-                if (current.on_hand !== where.on_hand || current.reserved !== where.reserved) {
+                if (
+                  current.on_hand !== where.on_hand ||
+                  current.reserved !== where.reserved
+                ) {
                   return { data: null, error: null };
                 }
 
@@ -227,7 +250,9 @@ Deno.test("handleOrdersCreate reserves stock and writes inventory movements", as
 
       if (table === "inventory_movements") {
         return {
-          insert: async (rows: Array<{ variant_id: string; reason: string; delta: number }>) => {
+          insert: async (
+            rows: Array<{ variant_id: string; reason: string; delta: number }>,
+          ) => {
             calls.movementRows = rows;
             return { error: null };
           },

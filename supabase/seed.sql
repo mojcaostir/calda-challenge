@@ -1,13 +1,5 @@
 -- =========================================================
--- QUERY F (LOCAL-ONLY): Seed AUTH USERS + PROFILES + ADDRESSES
--- =========================================================
-
-
-
-
--- =========================================================
--- QUERY G: Seed CATALOG (5 products, 1 variant each, inventory)
--- Note: Order payment/shipment tables were removed from schema.
+-- Seed CATALOG (5 products, 1 variant each, inventory)
 -- =========================================================
 with products_seed as (
   insert into public.products (title, description, status)
@@ -21,11 +13,18 @@ with products_seed as (
 ),
 variants_seed as (
   insert into public.product_variants (
-    product_id, sku, title,
+    id, product_id, sku, title,
     price_cents, currency,
     track_inventory, low_stock_threshold
   )
   select
+    case p.title
+      when 'Coffee Mug' then '33333333-3333-4333-8333-333333333333'::uuid
+      when 'T-Shirt' then '44444444-4444-4444-8444-444444444444'::uuid
+      when 'Notebook' then '55555555-5555-4555-8555-555555555555'::uuid
+      when 'Water Bottle' then '66666666-6666-4666-8666-666666666666'::uuid
+      when 'Sticker Pack' then '77777777-7777-4777-8777-777777777777'::uuid
+    end,
     p.id,
     case p.title
       when 'Coffee Mug' then 'MUG-350'
