@@ -21,7 +21,42 @@ type StockQuantity = {
   quantity: number;
 };
 
-function json(status: number, body: unknown) {
+type InventoryRow = {
+  variant_id: string;
+  on_hand: number;
+  reserved: number;
+};
+
+type VariantRow = {
+  id: string;
+  sku: string;
+  price_cents: number;
+  currency: string;
+  track_inventory: boolean;
+  product: { title: string };
+};
+
+type EnvLike = { get: (key: string) => string | undefined };
+
+type OrdersCreateDeps = {
+  createClientFn?: typeof createClient;
+  env?: EnvLike;
+  nowIso?: () => string;
+  generateOrderNumber?: () => string;
+};
+
+type SupabaseLikeClient = {
+  from: (table: string) => any;
+  auth: {
+    getUser: () => Promise<{ data: { user: { id: string } | null }; error: { message: string } | null }>;
+  };
+};
+
+type SupabaseLikeAdminClient = {
+  from: (table: string) => any;
+};
+
+function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -35,16 +70,17 @@ function getBearerToken(req: Request): string | null {
 }
 
 async function softDeleteOrder(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseLikeClient,
   orderId: string,
+  nowIso: () => string,
 ) {
   await supabase
     .from("orders")
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: nowIso() })
     .eq("id", orderId);
 }
 
-function inventoryModeForStatus(status: string): InventoryMode {
+export function inventoryModeForStatus(status: string): InventoryMode {
   if (status === "pending" || status === "placed") return "reserve";
   if (status === "paid" || status === "shipped" || status === "delivered") {
     return "purchase";
@@ -52,13 +88,15 @@ function inventoryModeForStatus(status: string): InventoryMode {
   return "none";
 }
 
-function movementReasonForMode(mode: InventoryMode): "reserve" | "purchase" | null {
+export function movementReasonForMode(mode: InventoryMode): "reserve" | "purchase" | null {
   if (mode === "reserve") return "reserve";
   if (mode === "purchase") return "purchase";
   return null;
 }
 
-function aggregateStockQuantities(lines: Array<{ variant_id: string; quantity: number }>): StockQuantity[] {
+export function aggregateStockQuantities(
+  lines: Array<{ variant_id: string; quantity: number }>,
+): StockQuantity[] {
   const byVariant = new Map<string, number>();
   for (const l of lines) {
     byVariant.set(l.variant_id, (byVariant.get(l.variant_id) ?? 0) + l.quantity);
@@ -68,7 +106,7 @@ function aggregateStockQuantities(lines: Array<{ variant_id: string; quantity: n
 }
 
 async function applyInventoryMutation(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseLikeAdminClient,
   quantities: StockQuantity[],
   mode: InventoryMode,
 ) {
@@ -85,10 +123,11 @@ async function applyInventoryMutation(
     throw new Error("Inventory row missing for one or more variants");
   }
 
+  const typedRows = inventoryRows as InventoryRow[];
   const byVariant = new Map(
-    inventoryRows.map((r) => [
+    typedRows.map((r: InventoryRow) => [
       r.variant_id,
-      { on_hand: r.on_hand as number, reserved: r.reserved as number },
+      { on_hand: r.on_hand, reserved: r.reserved },
     ]),
   );
 
@@ -121,7 +160,7 @@ async function applyInventoryMutation(
 }
 
 async function rollbackInventoryMutation(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseLikeAdminClient,
   quantities: StockQuantity[],
   mode: InventoryMode,
 ) {
@@ -138,10 +177,11 @@ async function rollbackInventoryMutation(
     return;
   }
 
+  const typedRows = inventoryRows as InventoryRow[];
   const byVariant = new Map(
-    inventoryRows.map((r) => [
+    typedRows.map((r: InventoryRow) => [
       r.variant_id,
-      { on_hand: r.on_hand as number, reserved: r.reserved as number },
+      { on_hand: r.on_hand, reserved: r.reserved },
     ]),
   );
 
@@ -165,7 +205,10 @@ async function rollbackInventoryMutation(
   }
 }
 
-serve(async (req) => {
+export async function handleOrdersCreate(
+  req: Request,
+  deps: OrdersCreateDeps = {},
+): Promise<Response> {
   if (req.method !== "POST") {
     console.log("Method not allowed:", req.method);
     return json(405, { error: "Method Not Allowed" });
@@ -174,25 +217,39 @@ serve(async (req) => {
   const token = getBearerToken(req);
   if (!token) return json(401, { error: "Missing Bearer token" });
 
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const env = deps.env ?? Deno.env;
+  const createClientFn = deps.createClientFn ?? createClient;
+  const nowIso = deps.nowIso ?? (() => new Date().toISOString());
+  const generateOrderNumber = deps.generateOrderNumber ??
+    (() => `ORD-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`);
+
+  const supabaseUrl = env.get("SUPABASE_URL");
+  if (!supabaseUrl) {
+    return json(500, { error: "SUPABASE_URL is not configured" });
+  }
+
   console.log("Using SUPABASE_URL from env: ", supabaseUrl);
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const anonKey = env.get("SUPABASE_ANON_KEY");
+  if (!anonKey) {
+    return json(500, { error: "SUPABASE_ANON_KEY is not configured" });
+  }
+
   console.log("Using SUPABASE_ANON_KEY from env:", anonKey);
 
 
-  const supabase = createClient(supabaseUrl, anonKey, {
+  const supabase = createClientFn(supabaseUrl, anonKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false },
-  });
+  }) as unknown as SupabaseLikeClient;
 
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const serviceRoleKey = env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!serviceRoleKey) {
     return json(500, { error: "SUPABASE_SERVICE_ROLE_KEY is not configured" });
   }
 
-  const admin = createClient(supabaseUrl, serviceRoleKey, {
+  const admin = createClientFn(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
-  });
+  }) as unknown as SupabaseLikeAdminClient;
 
   // 1) Identify user
   const { data: userData, error: userErr } = await supabase.auth.getUser();
@@ -306,7 +363,8 @@ serve(async (req) => {
 
   // 5) Compute totals and build order_lines payload
   let subtotal = 0;
-  const variantById = new Map((variants ?? []).map((v) => [v.id, v]));
+  const typedVariants = variants as VariantRow[];
+  const variantById = new Map(typedVariants.map((v: VariantRow) => [v.id, v]));
 
   const lines = items.map((it) => {
     const v = variantById.get(it.variant_id)!;
@@ -331,7 +389,7 @@ serve(async (req) => {
   }
 
   // 6) Insert order
-  const orderNumber = `ORD-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+  const orderNumber = generateOrderNumber();
 
   const { data: order, error: orderErr } = await supabase
     .from("orders")
@@ -367,7 +425,7 @@ serve(async (req) => {
 
   if (linesErr) {
     // best-effort cleanup: hide partial order from active read paths
-    await softDeleteOrder(supabase, order.id);
+    await softDeleteOrder(supabase, order.id, nowIso);
     return json(500, {
       error: "Order lines insert failed",
       detail: linesErr.message,
@@ -385,7 +443,7 @@ serve(async (req) => {
   try {
     await applyInventoryMutation(admin, stockQuantities, inventoryMode);
   } catch (e) {
-    await softDeleteOrder(supabase, order.id);
+    await softDeleteOrder(supabase, order.id, nowIso);
     return json(409, {
       error: "Inventory update failed",
       detail: (e as Error).message,
@@ -413,7 +471,7 @@ serve(async (req) => {
 
     if (movementErr) {
       await rollbackInventoryMutation(admin, stockQuantities, inventoryMode);
-      await softDeleteOrder(supabase, order.id);
+      await softDeleteOrder(supabase, order.id, nowIso);
       return json(500, {
         error: "Inventory movement insert failed",
         detail: movementErr.message,
@@ -431,8 +489,8 @@ serve(async (req) => {
     return json(500, { error: "Aggregation failed", detail: otherErr.message });
   }
 
-  const otherTotal = (otherOrders ?? []).reduce(
-    (acc, r) => acc + (r.total_cents ?? 0),
+  const otherTotal = ((otherOrders ?? []) as Array<{ total_cents: number | null }>).reduce(
+    (acc: number, r) => acc + (r.total_cents ?? 0),
     0,
   );
 
@@ -443,4 +501,8 @@ serve(async (req) => {
     total_cents: order.total_cents,
     other_orders_total_cents: otherTotal,
   });
-});
+}
+
+if (import.meta.main) {
+  serve((req) => handleOrdersCreate(req));
+}
