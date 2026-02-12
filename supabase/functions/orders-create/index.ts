@@ -14,6 +14,13 @@ type CreateOrderRequest = {
   items: CreateOrderItem[];
 };
 
+type InventoryMode = "reserve" | "purchase" | "none";
+
+type StockQuantity = {
+  variant_id: string;
+  quantity: number;
+};
+
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
     status,
@@ -27,9 +34,140 @@ function getBearerToken(req: Request): string | null {
   return match?.[1] ?? null;
 }
 
+async function softDeleteOrder(
+  supabase: ReturnType<typeof createClient>,
+  orderId: string,
+) {
+  await supabase
+    .from("orders")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", orderId);
+}
+
+function inventoryModeForStatus(status: string): InventoryMode {
+  if (status === "pending" || status === "placed") return "reserve";
+  if (status === "paid" || status === "shipped" || status === "delivered") {
+    return "purchase";
+  }
+  return "none";
+}
+
+function movementReasonForMode(mode: InventoryMode): "reserve" | "purchase" | null {
+  if (mode === "reserve") return "reserve";
+  if (mode === "purchase") return "purchase";
+  return null;
+}
+
+function aggregateStockQuantities(lines: Array<{ variant_id: string; quantity: number }>): StockQuantity[] {
+  const byVariant = new Map<string, number>();
+  for (const l of lines) {
+    byVariant.set(l.variant_id, (byVariant.get(l.variant_id) ?? 0) + l.quantity);
+  }
+
+  return Array.from(byVariant, ([variant_id, quantity]) => ({ variant_id, quantity }));
+}
+
+async function applyInventoryMutation(
+  admin: ReturnType<typeof createClient>,
+  quantities: StockQuantity[],
+  mode: InventoryMode,
+) {
+  if (mode === "none" || quantities.length === 0) return;
+
+  const variantIds = quantities.map((q) => q.variant_id);
+  const { data: inventoryRows, error: inventoryErr } = await admin
+    .from("inventory")
+    .select("variant_id, on_hand, reserved")
+    .in("variant_id", variantIds);
+
+  if (inventoryErr) throw new Error(`Inventory lookup failed: ${inventoryErr.message}`);
+  if (!inventoryRows || inventoryRows.length !== variantIds.length) {
+    throw new Error("Inventory row missing for one or more variants");
+  }
+
+  const byVariant = new Map(
+    inventoryRows.map((r) => [
+      r.variant_id,
+      { on_hand: r.on_hand as number, reserved: r.reserved as number },
+    ]),
+  );
+
+  for (const q of quantities) {
+    const current = byVariant.get(q.variant_id);
+    if (!current) throw new Error(`Inventory row missing for variant ${q.variant_id}`);
+
+    const available = current.on_hand - current.reserved;
+    if (available < q.quantity) {
+      throw new Error(`Insufficient stock for variant ${q.variant_id}`);
+    }
+
+    const nextOnHand = mode === "purchase" ? current.on_hand - q.quantity : current.on_hand;
+    const nextReserved = mode === "reserve" ? current.reserved + q.quantity : current.reserved;
+
+    const { data: updatedRow, error: updErr } = await admin
+      .from("inventory")
+      .update({ on_hand: nextOnHand, reserved: nextReserved })
+      .eq("variant_id", q.variant_id)
+      .eq("on_hand", current.on_hand)
+      .eq("reserved", current.reserved)
+      .select("variant_id")
+      .maybeSingle();
+
+    if (updErr) throw new Error(`Inventory update failed for ${q.variant_id}: ${updErr.message}`);
+    if (!updatedRow) {
+      throw new Error(`Inventory changed concurrently for ${q.variant_id}; retry request`);
+    }
+  }
+}
+
+async function rollbackInventoryMutation(
+  admin: ReturnType<typeof createClient>,
+  quantities: StockQuantity[],
+  mode: InventoryMode,
+) {
+  if (mode === "none" || quantities.length === 0) return;
+
+  const variantIds = quantities.map((q) => q.variant_id);
+  const { data: inventoryRows, error: inventoryErr } = await admin
+    .from("inventory")
+    .select("variant_id, on_hand, reserved")
+    .in("variant_id", variantIds);
+
+  if (inventoryErr || !inventoryRows) {
+    console.error("Inventory rollback lookup failed", inventoryErr?.message);
+    return;
+  }
+
+  const byVariant = new Map(
+    inventoryRows.map((r) => [
+      r.variant_id,
+      { on_hand: r.on_hand as number, reserved: r.reserved as number },
+    ]),
+  );
+
+  for (const q of quantities) {
+    const current = byVariant.get(q.variant_id);
+    if (!current) continue;
+
+    const nextOnHand = mode === "purchase" ? current.on_hand + q.quantity : current.on_hand;
+    const nextReserved = mode === "reserve"
+      ? Math.max(0, current.reserved - q.quantity)
+      : current.reserved;
+
+    const { error: updErr } = await admin
+      .from("inventory")
+      .update({ on_hand: nextOnHand, reserved: nextReserved })
+      .eq("variant_id", q.variant_id);
+
+    if (updErr) {
+      console.error(`Inventory rollback failed for ${q.variant_id}:`, updErr.message);
+    }
+  }
+}
+
 serve(async (req) => {
   if (req.method !== "POST") {
-    console.req("Method not allowed:", req.method);
+    console.log("Method not allowed:", req.method);
     return json(405, { error: "Method Not Allowed" });
   }
     
@@ -44,6 +182,15 @@ serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false },
+  });
+
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!serviceRoleKey) {
+    return json(500, { error: "SUPABASE_SERVICE_ROLE_KEY is not configured" });
+  }
+
+  const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
   });
 
@@ -133,7 +280,7 @@ serve(async (req) => {
 
   const { data: variants, error: variantsErr } = await supabase
     .from("product_variants")
-    .select("id, sku, price_cents, currency, product:products(title)")
+    .select("id, sku, price_cents, currency, track_inventory, product:products(title)")
     .in("id", variantIds);
 
   if (variantsErr) {
@@ -159,9 +306,10 @@ serve(async (req) => {
 
   // 5) Compute totals and build order_lines payload
   let subtotal = 0;
+  const variantById = new Map((variants ?? []).map((v) => [v.id, v]));
 
   const lines = items.map((it) => {
-    const v = variants.find((x) => x.id === it.variant_id)!;
+    const v = variantById.get(it.variant_id)!;
     const unit = v.price_cents as number;
     const lineSubtotal = it.quantity * unit;
     subtotal += lineSubtotal;
@@ -219,17 +367,61 @@ serve(async (req) => {
 
   if (linesErr) {
     // best-effort cleanup: hide partial order from active read paths
-    await supabase
-      .from("orders")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", order.id);
+    await softDeleteOrder(supabase, order.id);
     return json(500, {
       error: "Order lines insert failed",
       detail: linesErr.message,
     });
   }
 
-  // 8) Compute other orders sum
+  // 8) Apply inventory stock checks/updates for tracked variants.
+  const inventoryMode = inventoryModeForStatus(status);
+  const trackedLines = lines.filter((l) => {
+    const v = variantById.get(l.variant_id);
+    return v?.track_inventory ?? true;
+  });
+  const stockQuantities = aggregateStockQuantities(trackedLines);
+
+  try {
+    await applyInventoryMutation(admin, stockQuantities, inventoryMode);
+  } catch (e) {
+    await softDeleteOrder(supabase, order.id);
+    return json(409, {
+      error: "Inventory update failed",
+      detail: (e as Error).message,
+    });
+  }
+
+  // 9) Write inventory movement audit entries for this order
+  const movementReason = movementReasonForMode(inventoryMode);
+  if (movementReason && trackedLines.length > 0) {
+    const movementRows = trackedLines.map((l) => ({
+      variant_id: l.variant_id,
+      reason: movementReason,
+      delta: -l.quantity,
+      related_order_id: order.id,
+      actor_user_id: userId,
+      metadata: {
+        source: "orders-create",
+        order_number: order.order_number,
+      },
+    }));
+
+    const { error: movementErr } = await admin
+      .from("inventory_movements")
+      .insert(movementRows);
+
+    if (movementErr) {
+      await rollbackInventoryMutation(admin, stockQuantities, inventoryMode);
+      await softDeleteOrder(supabase, order.id);
+      return json(500, {
+        error: "Inventory movement insert failed",
+        detail: movementErr.message,
+      });
+    }
+  }
+
+  // 10) Compute other orders sum
   const { data: otherOrders, error: otherErr } = await supabase
     .from("orders")
     .select("total_cents")
@@ -244,7 +436,7 @@ serve(async (req) => {
     0,
   );
 
-  // 9) Return
+  // 11) Return
   return json(200, {
     order_id: order.id,
     order_number: order.order_number,
