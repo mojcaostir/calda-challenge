@@ -60,19 +60,7 @@ This will:
 
 ## ⚙️ Step 3 — Serve Edge Functions
 
-Create:
-
-```
-supabase/.env
-```
-
-and copy the values from
-
-```
-supabase/.env.example
-```
-
-Then run:
+Run:
 
 ```bash
 supabase functions serve
@@ -87,8 +75,7 @@ Leave this running.
 Run once:
 
 ```bash
-curl -X POST http://127.0.0.1:54321/functions/v1/dev-bootstrap \
-  -H "x-bootstrap-secret: dev-only-secret"
+curl -X POST http://127.0.0.1:54321/functions/v1/dev-bootstrap
 ```
 
 This will create two users

@@ -11,7 +11,6 @@ function json(status: number, body: unknown) {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ENV = Deno.env.get("SUPABASE_ENV");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const BOOTSTRAP_SECRET = Deno.env.get("BOOTSTRAP_SECRET");
 const IS_LOCAL_ENV = SUPABASE_ENV !== "production";
 const FIXED_USER_IDS: Record<string, string> = {
   "mojca.ostir@gmail.com": "11111111-1111-4111-8111-111111111111",
@@ -25,11 +24,6 @@ const FIXED_ADDRESS_IDS: Record<string, string> = {
 serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "Method Not Allowed" });
   if (!IS_LOCAL_ENV) return json(403, { error: "Not allowed outside local" });
-
-  const providedSecret = req.headers.get("x-bootstrap-secret") ?? "";
-  if (BOOTSTRAP_SECRET !== providedSecret) {
-    return json(403, { error: "Invalid bootstrap secret" });
-  }
 
   try {
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
