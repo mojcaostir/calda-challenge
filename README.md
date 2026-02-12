@@ -2,12 +2,12 @@
 
 This project implements a simple e-commerce backend using:
 
-* Supabase (Postgres + Auth + Edge Functions)
-* Row Level Security (RLS)
-* Order aggregation view
-* Audit logging via triggers
-* Edge Function for order creation
-* Dev bootstrap flow for local reproducibility
+- Supabase (Postgres + Auth + Edge Functions)
+- Row Level Security (RLS)
+- Order aggregation view
+- Audit logging via triggers
+- Edge Function for order creation
+- Dev bootstrap flow for local reproducibility
 
 ---
 
@@ -15,9 +15,9 @@ This project implements a simple e-commerce backend using:
 
 ### ✅ Prerequisites
 
-* Docker running
-* Node.js installed
-* Supabase CLI installed (`supabase` works)
+- Docker running
+- Node.js installed
+- Supabase CLI installed (`supabase` works)
 
 ---
 
@@ -35,9 +35,9 @@ supabase status
 
 You should see:
 
-* API running on `http://127.0.0.1:54321`
-* Studio on `http://127.0.0.1:54323`
-* Database on `postgresql://postgres:postgres@127.0.0.1:54322/postgres`
+- API running on `http://127.0.0.1:54321`
+- Studio on `http://127.0.0.1:54323`
+- Database on `postgresql://postgres:postgres@127.0.0.1:54322/postgres`
 
 ---
 
@@ -51,8 +51,8 @@ supabase db reset
 
 This will:
 
-* Apply all migrations
-* Seed **catalog data only** (products, variants, inventory)
+- Apply all migrations
+- Seed **catalog data only** (products, variants, inventory)
 
 > Users and orders are NOT created here.
 
@@ -66,7 +66,7 @@ Create:
 supabase/.env
 ```
 
-and copy the values from 
+and copy the values from
 
 ```
 supabase/.env.example
@@ -91,7 +91,10 @@ curl -X POST http://127.0.0.1:54321/functions/v1/dev-bootstrap \
   -H "x-bootstrap-secret: dev-only-secret"
 ```
 
-This will create two users [mojca.ostir@gmail.com](mailto:mojca.ostir@gmail.com), [mojca.ostir+1@gmail.com](mailto:mojca.ostir+1@gmail.com). Password for both is `Password123!`.
+This will create two users
+[mojca.ostir@gmail.com](mailto:mojca.ostir@gmail.com),
+[mojca.ostir+1@gmail.com](mailto:mojca.ostir+1@gmail.com). Password for both is
+`Password123!`.
 
 It will also create 3 orders (≥2 lines each).
 
@@ -115,7 +118,8 @@ This prints only `access_token`.
 
 ## 🧾 Step 6 — Create an Order via Edge Function
 
-AIn the following `curl` command apply `access_token`. Use the fixed shipping address ID created by `dev-bootstrap`:
+AIn the following `curl` command apply `access_token`. Use the fixed shipping
+address ID created by `dev-bootstrap`:
 
 - `mojca.ostir@gmail.com` → `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`
 - `mojca.ostir+1@gmail.com` → `bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`
@@ -200,8 +204,8 @@ http://127.0.0.1:54321/functions/v1
 
 `dev-bootstrap` is:
 
-* Local-only
-* Secret-protected
-* Not intended for production
+- Local-only
+- Secret-protected
+- Not intended for production
 
 ---
