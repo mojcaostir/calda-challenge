@@ -218,8 +218,11 @@ serve(async (req) => {
     .insert(orderLinesToInsert);
 
   if (linesErr) {
-    // best-effort cleanup to avoid orphan order
-    await supabase.from("orders").delete().eq("id", order.id);
+    // best-effort cleanup: hide partial order from active read paths
+    await supabase
+      .from("orders")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", order.id);
     return json(500, {
       error: "Order lines insert failed",
       detail: linesErr.message,
