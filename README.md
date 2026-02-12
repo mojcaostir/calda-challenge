@@ -93,7 +93,7 @@ curl -X POST http://127.0.0.1:54321/functions/v1/dev-bootstrap \
 
 This will create two users [mojca.ostir@gmail.com](mailto:mojca.ostir@gmail.com), [mojca.ostir+1@gmail.com](mailto:mojca.ostir+1@gmail.com). Password for both is `Password123!`.
 
-It will also create 3 orders (≥2 lines each) and 1 payment.
+It will also create 3 orders (≥2 lines each).
 
 This step is idempotent.
 
@@ -103,7 +103,7 @@ This step is idempotent.
 
 ```bash
 curl -sS "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
-  -H "apikey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH" \
+  -H "apikey: sb_publishable_eJfB9gfVaiY8W-DlM9DDaw_i8TsVBhP" \
   -H "content-type: application/json" \
   -d '{"email":"mojca.ostir@gmail.com","password":"Password123!"}'
 ```
