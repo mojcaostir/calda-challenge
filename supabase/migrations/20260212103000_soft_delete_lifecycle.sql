@@ -8,6 +8,12 @@
 
 create extension if not exists pg_cron;
 
+drop view if exists public.v_orders_with_items;
+drop table if exists public.payments;
+drop table if exists public.shipments;
+drop type if exists payment_status;
+drop type if exists shipment_status;
+
 -- ---------------------------------------------------------
 -- ORDERS: add soft-delete marker + supporting indexes
 -- ---------------------------------------------------------
@@ -143,148 +149,6 @@ using (
   )
 );
 
--- PAYMENTS
-
-drop policy if exists "payments_select_if_own_order" on public.payments;
-create policy "payments_select_if_own_order"
-on public.payments
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = payments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
-drop policy if exists "payments_insert_if_own_order" on public.payments;
-create policy "payments_insert_if_own_order"
-on public.payments
-for insert
-to authenticated
-with check (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = payments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
-drop policy if exists "payments_update_if_own_order" on public.payments;
-create policy "payments_update_if_own_order"
-on public.payments
-for update
-to authenticated
-using (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = payments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-)
-with check (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = payments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
-drop policy if exists "payments_delete_if_own_order" on public.payments;
-create policy "payments_delete_if_own_order"
-on public.payments
-for delete
-to authenticated
-using (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = payments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
--- SHIPMENTS
-
-drop policy if exists "shipments_select_if_own_order" on public.shipments;
-create policy "shipments_select_if_own_order"
-on public.shipments
-for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = shipments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
-drop policy if exists "shipments_insert_if_own_order" on public.shipments;
-create policy "shipments_insert_if_own_order"
-on public.shipments
-for insert
-to authenticated
-with check (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = shipments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
-drop policy if exists "shipments_update_if_own_order" on public.shipments;
-create policy "shipments_update_if_own_order"
-on public.shipments
-for update
-to authenticated
-using (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = shipments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-)
-with check (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = shipments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
-drop policy if exists "shipments_delete_if_own_order" on public.shipments;
-create policy "shipments_delete_if_own_order"
-on public.shipments
-for delete
-to authenticated
-using (
-  exists (
-    select 1
-    from public.orders o
-    where o.id = shipments.order_id
-      and o.user_id = auth.uid()
-      and o.deleted_at is null
-  )
-);
-
 -- CATALOG
 
 drop policy if exists "products_select_authenticated" on public.products;
@@ -357,9 +221,7 @@ select
       'updated_at', ba.updated_at
     )
   end as billing_address,
-  ol.items,
-  pay.payments,
-  shp.shipments
+  ol.items
 
 from public.orders o
 left join public.addresses sa on sa.id = o.shipping_address_id
@@ -387,52 +249,6 @@ left join lateral (
   from public.order_lines l
   where l.order_id = o.id
 ) ol on true
-left join lateral (
-  select
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'id', p.id,
-          'provider', p.provider,
-          'status', p.status,
-          'provider_payment_id', p.provider_payment_id,
-          'amount_cents', p.amount_cents,
-          'currency', p.currency,
-          'idempotency_key', p.idempotency_key,
-          'authorized_at', p.authorized_at,
-          'captured_at', p.captured_at,
-          'failed_at', p.failed_at,
-          'created_at', p.created_at,
-          'updated_at', p.updated_at
-        )
-        order by p.created_at
-      ) filter (where p.id is not null),
-      '[]'::jsonb
-    ) as payments
-  from public.payments p
-  where p.order_id = o.id
-) pay on true
-left join lateral (
-  select
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'id', s.id,
-          'carrier', s.carrier,
-          'tracking_number', s.tracking_number,
-          'status', s.status,
-          'shipped_at', s.shipped_at,
-          'delivered_at', s.delivered_at,
-          'created_at', s.created_at,
-          'updated_at', s.updated_at
-        )
-        order by s.created_at
-      ) filter (where s.id is not null),
-      '[]'::jsonb
-    ) as shipments
-  from public.shipments s
-  where s.order_id = o.id
-) shp on true
 where o.deleted_at is null;
 
 -- ---------------------------------------------------------

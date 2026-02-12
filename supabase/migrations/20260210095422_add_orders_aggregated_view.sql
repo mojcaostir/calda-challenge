@@ -7,8 +7,6 @@
 --       shipping_address (jsonb object)
 --       billing_address  (jsonb object)
 --       items     (jsonb array of order_lines)
---       payments  (jsonb array)
---       shipments (jsonb array)
 -- Security:
 --   - SECURITY INVOKER so underlying table RLS policies apply
 -- =========================================================
@@ -57,9 +55,7 @@ select
       'updated_at', ba.updated_at
     )
   end as billing_address,
-  ol.items,
-  pay.payments,
-  shp.shipments
+  ol.items
 
 from public.orders o
 left join public.addresses sa on sa.id = o.shipping_address_id
@@ -88,54 +84,4 @@ left join lateral (
     ) as items
   from public.order_lines l
   where l.order_id = o.id
-) ol on true
-
--- LATERAL: payments aggregation
-left join lateral (
-  select
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'id', p.id,
-          'provider', p.provider,
-          'status', p.status,
-          'provider_payment_id', p.provider_payment_id,
-          'amount_cents', p.amount_cents,
-          'currency', p.currency,
-          'idempotency_key', p.idempotency_key,
-          'authorized_at', p.authorized_at,
-          'captured_at', p.captured_at,
-          'failed_at', p.failed_at,
-          'created_at', p.created_at,
-          'updated_at', p.updated_at
-        )
-        order by p.created_at
-      ) filter (where p.id is not null),
-      '[]'::jsonb
-    ) as payments
-  from public.payments p
-  where p.order_id = o.id
-) pay on true
-
--- LATERAL: shipments aggregation
-left join lateral (
-  select
-    coalesce(
-      jsonb_agg(
-        jsonb_build_object(
-          'id', s.id,
-          'carrier', s.carrier,
-          'tracking_number', s.tracking_number,
-          'status', s.status,
-          'shipped_at', s.shipped_at,
-          'delivered_at', s.delivered_at,
-          'created_at', s.created_at,
-          'updated_at', s.updated_at
-        )
-        order by s.created_at
-      ) filter (where s.id is not null),
-      '[]'::jsonb
-    ) as shipments
-  from public.shipments s
-  where s.order_id = o.id
-) shp on true;
+) ol on true;

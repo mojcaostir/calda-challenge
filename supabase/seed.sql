@@ -7,6 +7,7 @@
 
 -- =========================================================
 -- QUERY G: Seed CATALOG (5 products, 1 variant each, inventory)
+-- Note: Order payment/shipment tables were removed from schema.
 -- =========================================================
 with products_seed as (
   insert into public.products (title, description, status)
@@ -59,4 +60,3 @@ select
   end,
   0
 from variants_seed v;
-

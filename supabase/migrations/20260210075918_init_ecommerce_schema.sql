@@ -16,14 +16,6 @@ begin
     create type order_status as enum ('pending','placed','paid','shipped','delivered','cancelled','refunded');
   end if;
 
-  if not exists (select 1 from pg_type where typname = 'payment_status') then
-    create type payment_status as enum ('requires_action','authorized','captured','failed','refunded','cancelled');
-  end if;
-
-  if not exists (select 1 from pg_type where typname = 'shipment_status') then
-    create type shipment_status as enum ('pending','shipped','delivered','returned','cancelled');
-  end if;
-
   if not exists (select 1 from pg_type where typname = 'inventory_movement_reason') then
     create type inventory_movement_reason as enum ('restock','adjustment','reserve','release','purchase','cancel');
   end if;
@@ -131,34 +123,6 @@ create table if not exists public.order_lines (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.payments (
-  id uuid primary key default gen_random_uuid(),
-  order_id uuid not null references public.orders(id) on delete cascade,
-  provider text not null,
-  status payment_status not null,
-  provider_payment_id text,
-  amount_cents int not null check (amount_cents >= 0),
-  currency text not null,
-  idempotency_key text unique,
-  authorized_at timestamptz,
-  captured_at timestamptz,
-  failed_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create table if not exists public.shipments (
-  id uuid primary key default gen_random_uuid(),
-  order_id uuid not null references public.orders(id) on delete cascade,
-  carrier text,
-  tracking_number text,
-  status shipment_status not null default 'pending',
-  shipped_at timestamptz,
-  delivered_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
 create table if not exists public.inventory_movements (
   id bigint generated always as identity primary key,
   variant_id uuid not null references public.product_variants(id) on delete cascade,
@@ -212,14 +176,6 @@ create index if not exists ix_order_lines_order_id on public.order_lines(order_i
 create index if not exists ix_order_lines_variant_id on public.order_lines(variant_id);
 create unique index if not exists ux_order_lines_order_variant on public.order_lines(order_id, variant_id);
 
-create index if not exists ix_payments_order_id on public.payments(order_id);
-create index if not exists ix_payments_status on public.payments(status);
-create index if not exists ix_payments_provider_payment_id on public.payments(provider_payment_id);
-
-create index if not exists ix_shipments_order_id on public.shipments(order_id);
-create index if not exists ix_shipments_status on public.shipments(status);
-create index if not exists ix_shipments_tracking_number on public.shipments(tracking_number);
-
 create index if not exists ix_inventory_movements_variant_created on public.inventory_movements(variant_id, created_at);
 create index if not exists ix_inventory_movements_related_order_id on public.inventory_movements(related_order_id);
 
@@ -268,14 +224,6 @@ for each row execute function public.set_updated_at();
 
 drop trigger if exists trg_order_lines_updated_at on public.order_lines;
 create trigger trg_order_lines_updated_at before update on public.order_lines
-for each row execute function public.set_updated_at();
-
-drop trigger if exists trg_payments_updated_at on public.payments;
-create trigger trg_payments_updated_at before update on public.payments
-for each row execute function public.set_updated_at();
-
-drop trigger if exists trg_shipments_updated_at on public.shipments;
-create trigger trg_shipments_updated_at before update on public.shipments
 for each row execute function public.set_updated_at();
 
 drop trigger if exists trg_inventory_movements_updated_at on public.inventory_movements;
