@@ -335,26 +335,6 @@ serve(async (req) => {
 
     if (linesErr) throw new Error(`order_lines upsert failed: ${linesErr.message}`);
 
-    // =========================================================
-    // 6) Seed payment for ORD-1001 (idempotent by idempotency_key)
-    // =========================================================
-    const { error: payErr } = await admin.from("payments").upsert(
-      {
-        order_id: orderId["ORD-1001"],
-        provider: "stripe",
-        status: "captured",
-        provider_payment_id: "pi_test_123",
-        amount_cents: ordersToUpsert[0].total_cents,
-        currency: "EUR",
-        idempotency_key: "idem-ord-1001-1",
-        authorized_at: new Date().toISOString(),
-        captured_at: new Date().toISOString(),
-      },
-      { onConflict: "idempotency_key" },
-    );
-
-    if (payErr) throw new Error(`payments upsert failed: ${payErr.message}`);
-
     return json(200, {
       ok: true,
       users: userResults,
