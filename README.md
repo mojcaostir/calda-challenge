@@ -149,8 +149,7 @@ supabase db reset
 Then rerun:
 
 ```bash
-curl -X POST http://127.0.0.1:54321/functions/v1/dev-bootstrap \
-  -H "x-bootstrap-secret: dev-only-secret"
+curl -X POST http://127.0.0.1:54321/functions/v1/dev-bootstrap
 ```
 
 ---
