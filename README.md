@@ -178,28 +178,6 @@ deno test --allow-all supabase/functions/tests/orders-create-test.ts
 
 ---
 
-## 🧪 Useful Local URLs
-
-Studio:
-
-```
-http://127.0.0.1:54323
-```
-
-REST:
-
-```
-http://127.0.0.1:54321/rest/v1
-```
-
-Edge Functions:
-
-```
-http://127.0.0.1:54321/functions/v1
-```
-
----
-
 ## 🛑 Important
 
 `dev-bootstrap` is:
